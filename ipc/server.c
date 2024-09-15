@@ -71,7 +71,7 @@ int main() {
 }
  
 double calculate(char operation, double operand) {
-    my_sleep(3);
+    my_sleep(5);
     printf("Calculating %c %lf\n", operation, operand);
     double result = 0;
     switch(operation) {
