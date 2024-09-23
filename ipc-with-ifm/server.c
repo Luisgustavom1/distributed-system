@@ -8,10 +8,23 @@
 #include <time.h>
 
 #define PORT 8080
- 
-double calculate(char operation, double operand);
+#define BUFFER_SIZE 1024
 
-void* calculate_t(void* arg);
+typedef enum {
+    WAITING,
+    PROCESSING,
+    SENDING,
+} State;
+
+typedef struct {
+    State state;
+    int sock;
+    double operand;
+    char operation;
+    char buffer[BUFFER_SIZE];
+} ServerContext;
+
+double calculate(char operation, double operand);
 
 void my_sleep(int seconds) {
     struct timespec req;
@@ -21,8 +34,37 @@ void my_sleep(int seconds) {
     nanosleep(&req, NULL);        
 }
 
+void handleClient(int client_socket) {
+    ServerContext ctx;
+    ctx.state = WAITING;
+    ctx.sock = client_socket;
+    memset(ctx.buffer, 0, BUFFER_SIZE);
+
+    while (1) {
+        switch (ctx.state) {
+            case WAITING:
+                printf("Waiting for client...\n");
+                read(ctx.sock, ctx.buffer, BUFFER_SIZE);
+                sscanf(ctx.buffer, "%c %lf", &ctx.operation, &ctx.operand);
+                ctx.state = PROCESSING;
+                break;
+            case PROCESSING:
+                printf("Processing...\n");
+                double result = calculate(ctx.operation, ctx.operand);
+                sprintf(ctx.buffer, "%lf", result);
+                ctx.state = SENDING;
+                break;
+            case SENDING:   
+                send(ctx.sock, ctx.buffer, strlen(ctx.buffer), 0);
+                memset(ctx.buffer, 0, sizeof(ctx.buffer));
+                ctx.state = WAITING;
+                break;
+        }
+    }
+}
+
 int main() {
-    int server_fd, new_socket;
+    int server_fd, client_socket;
     struct sockaddr_in address;
     int opt = 1;
     int addrlen = sizeof(address);
@@ -51,23 +93,16 @@ int main() {
         perror("listen");
         exit(EXIT_FAILURE);
     }
-    if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
+    if ((client_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
         perror("accept");
         exit(EXIT_FAILURE);
     }
  
-    char buffer[1024] = {0};
-    double operand;
-    char operation;
- 
     while(1) {
-        read(new_socket, buffer, 1024);
-        sscanf(buffer, "%c %lf", &operation, &operand);
-        double result = calculate(operation, operand);
-        sprintf(buffer, "%lf", result);
-        send(new_socket, buffer, strlen(buffer), 0);
-        memset(buffer, 0, sizeof(buffer));
+        handleClient(client_socket);
     }
+
+    close(server_fd);
  
     return 0;
 }
