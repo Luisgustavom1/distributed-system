@@ -49,7 +49,7 @@ void receive_msg(int fd) {
 
 void send_message(int fd) {
   char msg[80];
-  sprintf(msg, "Hello, client %d", get_connection(fd));
+  fgets(msg, sizeof(msg), stdin);
   send(fd, msg, strlen(msg), 0);
 }
 
@@ -87,6 +87,7 @@ void run_event_loop(int kq, int sock) {
         if (add_connection(fd) == 0) {
           EV_SET(&evSet, fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
           kevent(kq, &evSet, 1, NULL, 0, NULL);
+          printf("New connection on descriptor %d\n", fd);
           send_message(fd);
         } else {
           printf("Connection refused\n");
