@@ -49,8 +49,22 @@ void receive_msg(int fd) {
 
 void send_message(int fd) {
   char msg[80];
-  fgets(msg, sizeof(msg), stdin);
+  sprintf(msg, "Hello, client %d", get_connection(fd));
   send(fd, msg, strlen(msg), 0);
+}
+
+void broadcast_message() {
+  char msg[MAX_MSG_SIZE];
+  fgets(msg, sizeof(msg), stdin);
+  
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    struct client_data c = clients[i];
+    if (c.fd > 0) {
+      send(c.fd, msg, strlen(msg), 0);
+    }
+  }
+
+  fflush(stdout);
 }
 
 int create_socket_and_listen() {
@@ -67,6 +81,7 @@ int create_socket_and_listen() {
   bind(sock, addr->ai_addr, addr->ai_addrlen);
   listen(sock, 3);
 
+  printf("listening on fd %d\n", sock);
   return sock;
 }
 
@@ -82,12 +97,12 @@ void run_event_loop(int kq, int sock) {
       struct kevent ev = evList[i];
 
       // new connection
+      printf("received event from fd %lu\n", ev.ident);
       if (ev.ident == sock) {
         int fd = accept(evList[i].ident, (struct sockaddr *) &addr, &addr_size);
         if (add_connection(fd) == 0) {
           EV_SET(&evSet, fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
           kevent(kq, &evSet, 1, NULL, 0, NULL);
-          printf("New connection on descriptor %d\n", fd);
           send_message(fd);
         } else {
           printf("Connection refused\n");
@@ -99,8 +114,13 @@ void run_event_loop(int kq, int sock) {
         EV_SET(&evSet, fd, EVFILT_READ, EV_DELETE, 0, 0, NULL);
         kevent(kq, &evSet, 1, NULL, 0, NULL);
         del_connection(fd);
-      } else if (ev.filter == EVFILT_READ) {
+      // client events
+      } else if (ev.filter == EVFILT_READ & ev.ident != 0) {
         receive_msg(ev.ident);
+      // stdin events
+      } else if (ev.filter == EVFILT_READ & ev.ident == STDIN_FILENO) {
+        printf("broadcasting message...\n");
+        broadcast_message();
       }
     }
   }
@@ -109,14 +129,16 @@ void run_event_loop(int kq, int sock) {
 int main(int argc, char *argv[]) {
   int sock = create_socket_and_listen();
   int kq = kqueue();
-  struct kevent evSet;
+  struct kevent evSet[2];
 
-  EV_SET(&evSet, sock, EVFILT_READ, EV_ADD, 0, 0, NULL);
-  if (kevent(kq, &evSet, 1, NULL, 0, NULL) == -1) {
+  EV_SET(&evSet[0], sock, EVFILT_READ, EV_ADD, 0, 0, NULL);
+  EV_SET(&evSet[1], STDIN_FILENO, EVFILT_READ, EV_ADD, 0, 0, NULL);
+
+  if (kevent(kq, evSet, 2, NULL, 0, NULL) == -1) {
     perror("kevent");
     exit(EXIT_FAILURE);
   };
-
+  
   run_event_loop(kq, sock);
   close(sock);
   printf("Server shutting down...\n");
